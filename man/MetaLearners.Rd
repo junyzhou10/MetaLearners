@@ -60,7 +60,7 @@ and group lasso for AD-learning.
 \itemize{
 \item{SL.library}{: The algorithms to be included in for Super Learner. For algorithm is \code{SL} only.
 For details, please check package \link{SuperLearner}}
-\item{L.library.PS}{: The SL.library for propensity score estimation. It can be different from \code{SL.library}
+\item{SL.library.PS}{: The SL.library for propensity score estimation. It can be different from \code{SL.library}
 given some algorithms may not capable for multinomial outcomes. For algorithm is \code{SL} only.}
 \item{basis.func}{: To specify the basis functions. Currently support one of these
 \code{c("Polynomial", "bs", "ns")}, standing for polynomial regression, B-splines, and natural cubic spline.}
@@ -72,5 +72,10 @@ it is not needed.}
 }
 }
 \examples{
-
+\dontrun{
+require(doMC)
+registerDoMC(cores = 6)
+res = MetaLearners(simu.dat$X, simu.dat$Y, simu.dat$Trt, algorithm = "GAM")
+final.res = parseRes(res)
+}
 }

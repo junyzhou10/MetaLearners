@@ -28,7 +28,7 @@
 #' \itemize{
 #' \item{SL.library}{: The algorithms to be included in for Super Learner. For algorithm is \code{SL} only.
 #' For details, please check package [SuperLearner]}
-#' \item{L.library.PS}{: The SL.library for propensity score estimation. It can be different from \code{SL.library}
+#' \item{SL.library.PS}{: The SL.library for propensity score estimation. It can be different from \code{SL.library}
 #' given some algorithms may not capable for multinomial outcomes. For algorithm is \code{SL} only.}
 #' \item{basis.func}{: To specify the basis functions. Currently support one of these
 #' \code{c("Polynomial", "bs", "ns")}, standing for polynomial regression, B-splines, and natural cubic spline.}
@@ -44,7 +44,12 @@
 #' \item{T.res}{Results from T-learner}
 #' \item{X.res}{Results from X-learner}
 #' @examples
-#'
+#' \dontrun{
+#' require(doMC)
+#' registerDoMC(cores = 6)
+#' res = MetaLearners(simu.dat$X, simu.dat$Y, simu.dat$Trt, algorithm = "GAM")
+#' final.res = parseRes(res)
+#' }
 #' @md
 #' @import SuperLearner ranger splines dbarts BART glmnet dplyr
 #' @importFrom stats coef predict
@@ -86,6 +91,23 @@ MetaLearners <- function(X,
     stop("The algorithm at this moment only support one of the following inputs for `algorithm`: 'BART', 'GAM', 'RF', 'SL'!")
   }
 
+
+  # check controls:
+  controls.default = list(
+    SL.library = c("SL.bartMachine", "SL.gam", "SL.ranger"),
+    SL.library.PS = c("SL.bartMachine", "SL.gam", "SL.ranger"),
+    basis.func = "Polynomial",
+    degree = 2,
+    n.knots = 3,
+    X_train = NULL,
+    X_test = NULL
+  )
+  name.ctrl = names(controls.default)
+  for (ii in seq(length(name.ctrl))) {
+    if (is.null(controls[[name.ctrl[ii]]])) {
+      controls[[name.ctrl[ii]]] <- controls.default[[name.ctrl[ii]]]
+    }
+  }
 
   # generate simplex coordinates
   k = length(K.grp)
@@ -134,21 +156,27 @@ MetaLearners <- function(X,
     X_test = data.frame(X_test) %>% make_matrix
   }
 
+  pobs = ncol(X_train)
   # returns
   S.res <- T.res <- X.res <- R.res <- Rsim.res <- C.res <- AD.res <- NULL
 
   ######=============================== BART ==================================#####
   if (algorithm == "BART") {
     ######  BART: S-learner  ######
-    dat.test = NULL; dat.train = NULL
+    dat.train = data.frame(trt = Trt, X)
+    dat.tmp = dat.train
     for (ii in K.grp) {
-      dat.train = rbind(dat.train, cbind(ii, X))
-      dat.test = rbind(dat.test, cbind(ii, rbind(X, X.test)))
+      tmp = data.frame(trt = ii, rbind(X, X.test))
+      dat.tmp = rbind(dat.tmp, tmp)
     }
-    dat.test[,1] = as.factor(dat.test[,1])
-    S.fit = bart(x.train = cbind(as.factor(Trt), X), y.train = Y, x.test = dat.test, ntree = 200, verbose = FALSE)
+    dat.tmp[,1] = as.factor(dat.tmp[,1])
+    Z = as.matrix(dat.tmp[,-1])
+    dat.S = stats::model.matrix(~trt*Z-1, dat.tmp)
+    dat.train = dat.S[1:n.train,]; dat.test = dat.S[-(1:n.train),]
+    S.fit = bart(x.train = dat.train, y.train = Y, x.test = dat.test, ntree = 200, verbose = FALSE)
     S.res = matrix(S.fit$yhat.test.mean, ncol = length(K.grp), byrow = F)
-    SC.res= S.res[1:nrow(X),]; S.res = S.res[-(1:nrow(X)),]
+    SC.res= S.res[1:n.train,]; S.res = S.res[-(1:n.train),]
+
 
     ######  BART: T-learner  ######
     T.res = NULL; TX.res = NULL
@@ -268,15 +296,20 @@ MetaLearners <- function(X,
   ######=============================== RF ==================================#####
   if (algorithm == "RF") {
     ######  RF: S-learner  ######
-    dat.test = NULL; dat.train = NULL
+    dat.train = data.frame(trt = Trt, X)
+    dat.tmp = dat.train
     for (ii in K.grp) {
-      dat.test = rbind(dat.test, cbind(ii, rbind(X, X.test)))
+      tmp = data.frame(trt = ii, rbind(X, X.test))
+      dat.tmp = rbind(dat.tmp, tmp)
     }
-    dat.test[,1] = as.factor(dat.test[,1])
-    colnames(dat.test) <- colnames(data.frame(Trt = as.factor(Trt), X))
-    S.RF = ranger(Y~., data = data.frame(Y = Y, Trt = as.factor(Trt), X), num.trees = 500, always.split.variables = "Trt")
-    S.res = matrix(predict(S.RF, data = as.data.frame(dat.test))$predictions, ncol = length(K.grp), byrow = F)
-    SC.res= S.res[1:nrow(X),]; S.res = S.res[-(1:nrow(X)),]
+    dat.tmp[,1] = as.factor(dat.tmp[,1])
+    Z = as.matrix(dat.tmp[,-1])
+    dat.S = stats::model.matrix(~trt*Z-1, dat.tmp)
+    dat.train = dat.S[1:n.train,]; dat.test = dat.S[-(1:n.train),]
+    colnames(dat.test) <- colnames(data.frame(dat.train))
+    S.RF = ranger(Y~., data = data.frame(Y = Y, dat.train), num.trees = 500)
+    S.res = matrix(predict(S.RF, data = dat.test)$predictions, ncol = length(K.grp), byrow = F)
+    SC.res= S.res[1:n.train,]; S.res = S.res[-(1:n.train),]
 
     ######  RF: T-learner  ######
     T.res = NULL; TX.res = NULL
@@ -327,7 +360,6 @@ MetaLearners <- function(X,
   }
 
 
-  pobs = ncol(X_train)
   ######=================  General: deC-learner  =====================######
   h.hat  = (rowMeans(TX.res) + rowMeans(SC.res))/2
   h.hatS = rowMeans(SC.res)
@@ -380,6 +412,7 @@ MetaLearners <- function(X,
         est.R = predict(fit.R, newx = newX, type = "response", s = "lambda.min")
         Est.R = cbind(Est.R, est.R)
       }
+      colnames(Est.R) <- paste(K.grp[-which(K.grp == r)], r, sep = "-")
       R.res = c(R.res, list(Est.R))
     }
     names(R.res) <- paste0("R", K.grp)
@@ -400,6 +433,7 @@ MetaLearners <- function(X,
   }
 
   # returns
+  colnames(S.res) <- colnames(T.res) <- colnames(Rsim.res) <- colnames(C.res$C.resST) <- colnames(C.res$C.resS) <- colnames(C.res$C.resT) <- colnames(AD.res) <- K.grp
   return(list(S.res = S.res, T.res = T.res, X.res = X.res,
               R.res = R.res, Rsim.res = Rsim.res,
               C.res = C.res, AD.res = AD.res))
