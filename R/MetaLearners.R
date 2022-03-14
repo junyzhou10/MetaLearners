@@ -43,6 +43,14 @@
 #' \item{S.res}{Results from S-learner}
 #' \item{T.res}{Results from T-learner}
 #' \item{X.res}{Results from X-learner}
+#' \item{R.res}{Results from R-learner. Notably, it contains multiple list of results with different
+#' choice of reference. The results can be different with the reference level selection, especially
+#' when treatment allocation is unbalanced.}
+#' \item{Rsim.res}{Results from simplex R-learner}
+#' \item{C.res}{Results from deC-learner, which contains \code{C.resS}, \code{C.resT}, and \code{C.resST},
+#' representing using S-, T-, and average of S- and T- in calculating the model average. When sample size
+#' is small or treatment allocation is unbalanced, \code{C.resS} is more preferred.}
+#' \item{AD.res}{Results from AD-learning}
 #' @examples
 #' \dontrun{
 #' require(doMC)
