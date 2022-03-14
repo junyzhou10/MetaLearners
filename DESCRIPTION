@@ -1,11 +1,26 @@
+VignetteBuilder: knitr
 Package: MetaLearners
 Type: Package
-Title: What the Package Does (Title Case)
+Title: Meta-learners for individual/heterogeneous treatment effect estimation & optimal treatment recommendation
 Version: 0.1.0
-Author: Who wrote it
-Maintainer: The package maintainer <yourself@somewhere.net>
-Description: More about what it does (maybe more than one line)
-    Use four spaces when indenting paragraphs within the Description.
-License: What license is it under?
+Author: Junyi Zhou
+Maintainer: Junyi Zhou <jzhou10@amgen.com>
+Description: The package is developed for treatment recommendation & pairwise treatment individual 
+  effect estimation, i.e., ITE/HTE/CATE. It includes some published methods such as S-learner, T-leaner, 
+  X-learner, and R-learner and some newer/unpublished methods like reference-free simplex R-learner 
+  and de-Centralized-learner. Angle-based direct learning (AD-learner), an outcome-weighting-based 
+  treatment recommendation method, is included as well.
+Imports: splines, utils, MASS, stats, SuperLearner, ranger, BART, dbarts, glmnet, dplyr
+License: GPL (>= 2)
 Encoding: UTF-8
 LazyData: true
+Suggests:
+    roxygen2,
+    knitr
+Depends: 
+     R (>= 3.6.0)
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.1.1
+URL: https://github.com/junyzhou10/MetaLearners
+BugReports: https://github.com/junyzhou10/MetaLearners/issues
+
