@@ -5,7 +5,7 @@ Notably, the S-, T-, and X-learner follows the nomenclature of [Kunzel et. al](h
 
 R-learner is proposed by [Nie and Wager](https://academic.oup.com/biomet/article/108/2/299/5911092?login=true) mainly for two-treatment setting. Here we extend it for multiple treatment setting as well but we found that different reference group may cause different results. 
 
-AD-learning is relatively new method by [Qi et. al.](https://www.tandfonline.com/doi/abs/10.1080/01621459.2018.1529597) which does not involve the estimation of treatment effects but ITR. ITR, a mapping from covariate space to treatment space, is a treatment decision rule that determines the optimal treatment directly given the subject's covariates. 
+AD-learning is relatively new method by [Qi et. al.](https://www.tandfonline.com/doi/abs/10.1080/01621459.2018.1529597) which does not involve the estimation of treatment effects but ITR. Individualized Treatment Rules/Regimens/Recommendations (ITR), a mapping from covariate space to treatment space, is a treatment decision rule that determines the optimal treatment directly given the subject's covariates. 
 
 Reference-free R-learner and de-Centralized-learner is either under review or under development. Reference will be added later on.
 
