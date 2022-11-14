@@ -16,3 +16,6 @@ To install the package:
 ```
 devtools::install_github("junyzhou10/MetaLearners")
 ```
+
+# Updates (11/13/2022)
+Now binary outcomes is allowed for S-, T-, and de-Centralized learner. Notice that, binary outcome is not supposed to be supported by X-, and R-learner methods. AD-learner is capable, and will be developed soon.
