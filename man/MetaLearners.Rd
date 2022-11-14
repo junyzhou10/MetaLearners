@@ -11,15 +11,16 @@ MetaLearners(
   X.test = NULL,
   Learners = c("X", "R", "Rsim", "AD"),
   algorithm = "BART",
-  controls = list(SL.library = c("SL.bartMachine", "SL.gam", "SL.ranger"),
-    SL.library.PS = c("SL.bartMachine", "SL.gam", "SL.ranger"), basis.func =
-    "Polynomial", degree = 2, n.knots = 3, X_train = NULL, X_test = NULL)
+  controls = list(SL.library = c("SL.bartMachine", "SL.gam", "SL.ranger"), SL.library.PS
+    = c("SL.bartMachine", "SL.gam", "SL.ranger"), basis.func = "Polynomial", degree = 2,
+    n.knots = 3, X_train = NULL, X_test = NULL)
 )
 }
 \arguments{
 \item{X}{Data matrix}
 
-\item{Y}{Outcome}
+\item{Y}{Outcome. Support either continuous or binary. If \code{Y} only has two levels, will be deemed
+as binary outcome}
 
 \item{Trt}{Treatment assignment indicator}
 
