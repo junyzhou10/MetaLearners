@@ -51,8 +51,10 @@
 #' when treatment allocation is unbalanced.}
 #' \item{Rsim.res}{Results from simplex R-learner}
 #' \item{C.res}{Results from deC-learner, which contains \code{C.resS}, \code{C.resT}, and \code{C.resST},
-#' representing using S-, T-, and average of S- and T- in calculating the model average. When sample size
-#' is small or treatment allocation is unbalanced, \code{C.resS} is more preferred.}
+#'              representing using S-, T-, and average of S- and T- in calculating the model average. When sample size
+#'              is small or treatment allocation is unbalanced, \code{C.resS} is more preferred. Notably, if binary outcome,
+#'              the reported values \code{Pr[Y=1]} are not the causal estimand deC-learner is designed
+#'              for; please transform them to log(OR).}
 #' \item{AD.res}{Results from AD-learning}
 #' @examples
 #' \dontrun{
@@ -241,7 +243,7 @@ MetaLearners <- function(X,
 
     }
 
-
+    ######=============================== RF ==================================#####
     if (algorithm == "RF") {
       ######  RF: S-learner  ######
       dat.train = data.frame(trt = Trt, X)
@@ -272,9 +274,12 @@ MetaLearners <- function(X,
 
 
     ######=================  General: deC-learner  =====================######
-    h.hat  = (rowMeans(TX.res) + rowMeans(SC.res))/2
     h.hatS = rowMeans(SC.res)
     h.hatT = rowMeans(TX.res)
+    h.hat  = (h.hatT + h.hatS)/2
+    h.hatS.test = rowMeans(log(S.res/(1-S.res)))
+    h.hatT.test = rowMeans(log(T.res/(1-T.res)))
+    h.hat.test  = (h.hatS.test + h.hatT.test)/2
 
     # transform data X into required shape:
     x.whole = cbind(1, X_train)
@@ -291,15 +296,15 @@ MetaLearners <- function(X,
     # combine both S- and T- results
     best.beta = stats::coef(fit.tau,s="lambda.min")
     best.beta = matrix(best.beta[-1], nrow = pobs+1, byrow = T)
-    C.resST = x.test.whole %*% best.beta %*% W + h.hat # this is log(Odds)
+    C.resST = x.test.whole %*% best.beta %*% W + h.hat.test # this is log(Odds)
     # based on S-
     best.beta = stats::coef(fit.tauS, s="lambda.min")
     best.beta = matrix(best.beta[-1], nrow = pobs+1, byrow = T)
-    C.resS = x.test.whole %*% best.beta %*% W + h.hatS
+    C.resS = x.test.whole %*% best.beta %*% W + h.hatS.test
     # based on T-
     best.beta = stats::coef(fit.tauT, s="lambda.min")
     best.beta = matrix(best.beta[-1], nrow = pobs+1, byrow = T)
-    C.resT = x.test.whole %*% best.beta %*% W + h.hatT
+    C.resT = x.test.whole %*% best.beta %*% W + h.hatT.test
     # deC-learner results
     C.res = list(C.resST = 1/(1+exp(-C.resST)), C.resS = 1/(1+exp(-C.resS)), C.resT = 1/(1+exp(-C.resT))) # keep consistent, return Pr(Y=1)
 
