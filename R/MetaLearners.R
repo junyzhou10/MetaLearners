@@ -41,7 +41,9 @@
 #' }
 #'
 #' @return
-#' \item{S.res}{Results from S-learner}
+#' \item{S.res}{Results from S-learner. If binary outcome, then it represents the probability of \code{T=1}.
+#'              Causal estimands like log(Relative Risk), or log(Odds Ratio) can be obtained
+#'              from these estimated probabilities. Same for the rest.}
 #' \item{T.res}{Results from T-learner}
 #' \item{X.res}{Results from X-learner}
 #' \item{R.res}{Results from R-learner. Notably, it contains multiple list of results with different
@@ -208,6 +210,66 @@ MetaLearners <- function(X,
       ######  BART: R/Rsim-learner  ######
       # not available for Robinson's decomposition
     }
+
+
+    ######=============================== GAM ==================================#####
+    if (algorithm == "GAM") {
+      ######  GAM: S-learner  ######
+      dat.train = data.frame(trt = Trt, X_train)
+      dat.tmp = dat.train
+      for (ii in K.grp) {
+        tmp = data.frame(trt = ii, rbind(X_train, X_test))
+        dat.tmp = rbind(dat.tmp, tmp)
+      }
+      dat.tmp[,1] = as.factor(dat.tmp[,1])
+      Z = as.matrix(dat.tmp[,-1])
+      dat.S = stats::model.matrix(~trt*Z-1, dat.tmp)
+      dat.train = dat.S[1:n.train,]; dat.test = dat.S[-(1:n.train),]
+      S.GAM = cv.glmnet(dat.train, Y, family = "binomial", parallel = TRUE, maxit = 100000, intercept=T)
+      S.res = matrix(predict(S.GAM, newx = dat.test, type = "response", s = "lambda.min"), ncol = length(K.grp), byrow = F)
+      SC.res= S.res[1:n.train,]; SC.res = log(SC.res/(1-SC.res))
+      S.res = S.res[-(1:n.train),]
+
+      ######  GAM: T-learner  ######
+      T.res = NULL; TX.res = NULL
+      for (ii in K.grp) {
+        T.GAM = cv.glmnet(X_train[Trt==ii,], Y[Trt==ii], family = "binomial", parallel = TRUE, maxit = 100000, intercept=T)
+        TX.res = cbind(TX.res, predict(T.GAM, newx = X_train, type = "response", s = "lambda.min"))
+        T.res = cbind(T.res, predict(T.GAM, newx = X_test, type = "response", s = "lambda.min"))
+      }
+      TX.res = log(TX.res/(1-TX.res)) # log(Odds) for deC-learner
+
+    }
+
+
+    if (algorithm == "RF") {
+      ######  RF: S-learner  ######
+      dat.train = data.frame(trt = Trt, X)
+      dat.tmp = dat.train
+      for (ii in K.grp) {
+        tmp = data.frame(trt = ii, rbind(X, X.test))
+        dat.tmp = rbind(dat.tmp, tmp)
+      }
+      dat.tmp[,1] = as.factor(dat.tmp[,1])
+      Z = as.matrix(dat.tmp[,-1])
+      dat.S = stats::model.matrix(~trt*Z-1, dat.tmp)
+      dat.train = dat.S[1:n.train,]; dat.test = dat.S[-(1:n.train),]
+      colnames(dat.test) <- colnames(data.frame(dat.train))
+      S.RF = ranger(Y~., data = data.frame(Y = Y, dat.train), num.trees = 500, probability = T)
+      S.res = matrix(predict(S.RF, data = dat.test)$predictions[,1], ncol = length(K.grp), byrow = F)
+      SC.res= S.res[1:n.train,]; SC.res = log(SC.res/(1-SC.res))
+      S.res = S.res[-(1:n.train),]
+
+      ######  RF: T-learner  ######
+      T.res = NULL; TX.res = NULL
+      for (ii in K.grp) {
+        T.RF = ranger(Y~., data = data.frame(Y = Y[Trt==ii], X[Trt==ii,]), num.trees = 500, probability = T)
+        TX.res = cbind(TX.res, predict(T.RF, data = data.frame(X))$predictions[,1])
+        T.res = cbind(T.res, predict(T.RF, data = data.frame(X.test))$predictions[,1])
+      }
+      TX.res = log(TX.res/(1-TX.res)) # log(Odds) for deC-learner
+    }
+
 
     ######=================  General: deC-learner  =====================######
     h.hat  = (rowMeans(TX.res) + rowMeans(SC.res))/2
@@ -431,7 +493,7 @@ MetaLearners <- function(X,
       }
 
 
-      ######  BART: R/Rsim-learner  ######
+      ######  RF: R/Rsim-learner  ######
       if ("R" %in% Learners | "Rsim" %in% Learners) {
         # estimate m(X) := E(Y|X)
         m.fit = ranger(Y~., data = data.frame(Y=Y, X), num.trees = 500)

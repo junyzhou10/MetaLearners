@@ -36,7 +36,9 @@ and Super Learner (SL). The default is \code{BART}.}
 \item{controls}{A list of control arguments for analysis. See details.}
 }
 \value{
-\item{S.res}{Results from S-learner}
+\item{S.res}{Results from S-learner. If binary outcome, then it represents the probability of \code{T=1}.
+Causal estimands like log(Relative Risk), or log(Odds Ratio) can be obtained
+from these estimated probabilities. Same for the rest.}
 \item{T.res}{Results from T-learner}
 \item{X.res}{Results from X-learner}
 \item{R.res}{Results from R-learner. Notably, it contains multiple list of results with different
