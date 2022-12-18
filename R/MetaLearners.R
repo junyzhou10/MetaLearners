@@ -586,7 +586,13 @@ MetaLearners <- function(X,
     }
 
     # returns
-    colnames(S.res) <- colnames(T.res) <- colnames(Rsim.res) <- colnames(C.res$C.resST) <- colnames(C.res$C.resS) <- colnames(C.res$C.resT) <- colnames(AD.res) <- K.grp
+    if (!is.null(Rsim.res)) {
+      colnames(Rsim.res) <- K.grp
+    }
+    if (!is.null(AD.res)) {
+      colnames(AD.res) <- K.grp
+    }
+    colnames(S.res) <- colnames(T.res) <- colnames(C.res$C.resST) <- colnames(C.res$C.resS) <- colnames(C.res$C.resT) <- K.grp
     return(list(S.res = S.res, T.res = T.res, X.res = X.res,
                 R.res = R.res, Rsim.res = Rsim.res,
                 C.res = C.res, AD.res = AD.res))

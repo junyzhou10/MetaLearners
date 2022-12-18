@@ -47,7 +47,9 @@ when treatment allocation is unbalanced.}
 \item{Rsim.res}{Results from simplex R-learner}
 \item{C.res}{Results from deC-learner, which contains \code{C.resS}, \code{C.resT}, and \code{C.resST},
 representing using S-, T-, and average of S- and T- in calculating the model average. When sample size
-is small or treatment allocation is unbalanced, \code{C.resS} is more preferred.}
+is small or treatment allocation is unbalanced, \code{C.resS} is more preferred. Notably, if binary outcome,
+the reported values \code{Pr[Y=1]} are not the causal estimand deC-learner is designed
+for; please transform them to log(OR).}
 \item{AD.res}{Results from AD-learning}
 }
 \description{
