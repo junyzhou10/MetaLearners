@@ -7,7 +7,9 @@ R-learner is proposed by [Nie and Wager](https://academic.oup.com/biomet/article
 
 AD-learning is relatively new method by [Qi et. al.](https://www.tandfonline.com/doi/abs/10.1080/01621459.2018.1529597) which does not involve the estimation of treatment effects but ITR. Individualized Treatment Rules/Regimens/Recommendations (ITR), a mapping from covariate space to treatment space, is a treatment decision rule that determines the optimal treatment directly given the subject's covariates. 
 
-Reference-free R-learner and de-Centralized-learner is either under review or under development. Reference will be added later on.
+Reference-free R-learner is proposed by [Zhou et. al.](https://journals.sagepub.com/doi/10.1177/09622802221144326) which follows the idea of R-learner but fixes the issue of recommendation inconsistency in multi-armed scenarios.
+
+de-Centralized-learner is now under development. For more details, please wait for publication.
 
 Some technical details can be found on author's [website](https://jzhou.org/posts/metalearner/).
 
