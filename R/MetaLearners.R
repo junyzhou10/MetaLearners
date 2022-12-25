@@ -90,6 +90,9 @@ MetaLearners <- function(X,
   }
 
   # detect number of treatments & generate global variables
+  Trt = as.factor(Trt)
+  Trt.name = levels(Trt)
+  Trt = as.numeric(Trt)
   K.grp = sort(unique(Trt))
   k = length(K.grp)
   p = ncol(X)
@@ -358,7 +361,7 @@ MetaLearners <- function(X,
             ps.ij    = ps.test[,c(i,j)]
             ps.ij    = ps.ij/rowSums(ps.ij)
             X.res    = cbind(X.res, X.bart.i$yhat.test.mean*ps.ij[,2]+X.bart.j$yhat.test.mean*ps.ij[,1])
-            X.names  = c(X.names, paste0(i,"-",j))
+            X.names  = c(X.names, paste0(Trt.name[i],"-",Trt.name[j]))
           }
         }
         colnames(X.res) <- X.names
@@ -428,7 +431,7 @@ MetaLearners <- function(X,
             ps.ij    = ps.test[,c(i,j)]
             ps.ij    = ps.ij/rowSums(ps.ij)
             X.res    = cbind(X.res, predict(X.gam.i, newx = X_test, type = "response", s = "lambda.min")*ps.ij[,2] + predict(X.gam.j, newx = X_test, type = "response", s = "lambda.min")*ps.ij[,1])
-            X.names  = c(X.names, paste0(i,"-",j))
+            X.names  = c(X.names, paste0(Trt.name[i],"-",Trt.name[j]))
           }
         }
         colnames(X.res) <- X.names
@@ -491,7 +494,7 @@ MetaLearners <- function(X,
             ps.ij    = ps.test[,c(i,j)]
             ps.ij    = ps.ij/rowSums(ps.ij)
             X.res    = cbind(X.res, predict(X.rf.i, data = data.frame(X.test))$predictions*ps.ij[,2]+predict(X.rf.j, data = data.frame(X.test))$predictions*ps.ij[,1])
-            X.names  = c(X.names, paste0(i,"-",j))
+            X.names  = c(X.names, paste0(Trt.name[i],"-",Trt.name[j]))
           }
         }
         colnames(X.res) <- X.names
@@ -565,7 +568,7 @@ MetaLearners <- function(X,
           est.R = predict(fit.R, newx = newX, type = "response", s = "lambda.min")
           Est.R = cbind(Est.R, est.R)
         }
-        colnames(Est.R) <- paste(K.grp[-which(K.grp == r)], r, sep = "-")
+        colnames(Est.R) <- paste(Trt.name[-which(K.grp == r)], Trt.name[r], sep = "-")
         R.res = c(R.res, list(Est.R))
       }
       names(R.res) <- paste0("R", K.grp)
@@ -587,12 +590,12 @@ MetaLearners <- function(X,
 
     # returns
     if (!is.null(Rsim.res)) {
-      colnames(Rsim.res) <- K.grp
+      colnames(Rsim.res) <- Trt.name
     }
     if (!is.null(AD.res)) {
-      colnames(AD.res) <- K.grp
+      colnames(AD.res) <- Trt.name
     }
-    colnames(S.res) <- colnames(T.res) <- colnames(C.res$C.resST) <- colnames(C.res$C.resS) <- colnames(C.res$C.resT) <- K.grp
+    colnames(S.res) <- colnames(T.res) <- colnames(C.res$C.resST) <- colnames(C.res$C.resS) <- colnames(C.res$C.resT) <- Trt.name
     return(list(S.res = S.res, T.res = T.res, X.res = X.res,
                 R.res = R.res, Rsim.res = Rsim.res,
                 C.res = C.res, AD.res = AD.res))
