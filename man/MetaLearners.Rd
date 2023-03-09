@@ -9,11 +9,12 @@ MetaLearners(
   Y,
   Trt,
   X.test = NULL,
-  Learners = c("X", "R", "Rsim", "AD"),
+  Learners = c("S", "T", "X", "R", "Rsim", "AD", "deC"),
   algorithm = "BART",
   controls = list(SL.library = c("SL.bartMachine", "SL.gam", "SL.ranger"), SL.library.PS
     = c("SL.bartMachine", "SL.gam", "SL.ranger"), basis.func = "Polynomial", degree = 2,
-    n.knots = 3, X_train = NULL, X_test = NULL)
+    n.knots = 3, X_train = NULL, X_test = NULL),
+  ...
 )
 }
 \arguments{
@@ -26,14 +27,17 @@ as binary outcome}
 
 \item{X.test}{Test data. If \code{NULL}, training dataset, i.e., \code{X} will be used. In practice, \code{X.test} is always \code{NULL}.}
 
-\item{Learners}{The S-, T-, and deC-learners are always adopted since they can do both treatment effect
-estimation and optimal treatment recommendation. Other learners are optional. Default includes all of them.}
+\item{Learners}{One or more of \code{"S", "T", "X", "R", "Rsim", "AD", "deC"}. Default includes all of them.
+Notably, if "deC" is called, results from S- and T-learner will be reported as by product}
 
 \item{algorithm}{Machine learning algorithm for the analysis. Currently, it supports one of \code{c("BART", "GAM", "RF", "SL")}.
 representing Bayesian Additive Regression Trees (BART), Generalized Boosted Method (GBM), Random Forest (RF),
 and Super Learner (SL). The default is \code{BART}.}
 
 \item{controls}{A list of control arguments for analysis. See details.}
+
+\item{...}{Additional argument for corresponding base-learners, e.g., \code{bart} in \code{dbarts} for BART,
+\code{ranger} in package \code{ranger} for random forest.}
 }
 \value{
 \item{S.res}{Results from S-learner. If binary outcome, then it represents the probability of \code{T=1}.

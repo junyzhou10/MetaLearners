@@ -51,18 +51,27 @@ parseRes <- function(Meta.Res) {
   # X-learner(no need to do adjust)
   X.res$ITE <- Meta.Res$X.res
   # S-learner
-  S.res$Opt.trt = name.seq[apply(Meta.Res$S.res, 1, which.max)]
-  S.res$ITE = util.func(Meta.Res$S.res)
+  if (!is.null(Meta.Res$S.res)) {
+    S.res$Opt.trt = name.seq[apply(Meta.Res$S.res, 1, which.max)]
+    S.res$ITE = util.func(Meta.Res$S.res)
+  }
+
   # T-learner
-  T.res$Opt.trt = name.seq[apply(Meta.Res$T.res, 1, which.max)]
-  T.res$ITE = util.func(Meta.Res$T.res)
+  if (!is.null(Meta.Res$T.res)) {
+    T.res$Opt.trt = name.seq[apply(Meta.Res$T.res, 1, which.max)]
+    T.res$ITE = util.func(Meta.Res$T.res)
+  }
+
   # deC-learners
-  C.resT$Opt.trt = name.seq[apply(Meta.Res$C.res$C.resT, 1, which.max)]
-  C.resT$ITE = util.func(Meta.Res$C.res$C.resT)
-  C.resS$Opt.trt = name.seq[apply(Meta.Res$C.res$C.resS, 1, which.max)]
-  C.resS$ITE = util.func(Meta.Res$C.res$C.resS)
-  C.resST$Opt.trt = name.seq[apply(Meta.Res$C.res$C.resST, 1, which.max)]
-  C.resST$ITE = util.func(Meta.Res$C.res$C.resST)
+  if (!is.null(Meta.Res$C.res)) {
+    C.resT$Opt.trt = name.seq[apply(Meta.Res$C.res$C.resT, 1, which.max)]
+    C.resT$ITE = util.func(Meta.Res$C.res$C.resT)
+    C.resS$Opt.trt = name.seq[apply(Meta.Res$C.res$C.resS, 1, which.max)]
+    C.resS$ITE = util.func(Meta.Res$C.res$C.resS)
+    C.resST$Opt.trt = name.seq[apply(Meta.Res$C.res$C.resST, 1, which.max)]
+    C.resST$ITE = util.func(Meta.Res$C.res$C.resST)
+  }
+
 
   # R-learners
   if (is.null(Meta.Res$R.res)) {

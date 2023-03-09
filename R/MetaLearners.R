@@ -6,12 +6,14 @@
 #'          as binary outcome
 #' @param Trt Treatment assignment indicator
 #' @param X.test Test data. If \code{NULL}, training dataset, i.e., \code{X} will be used. In practice, \code{X.test} is always \code{NULL}.
-#' @param Learners The S-, T-, and deC-learners are always adopted since they can do both treatment effect
-#' estimation and optimal treatment recommendation. Other learners are optional. Default includes all of them.
+#' @param Learners One or more of \code{"S", "T", "X", "R", "Rsim", "AD", "deC"}. Default includes all of them.
+#'                 Notably, if "deC" is called, results from S- and T-learner will be reported as by product
 #' @param algorithm Machine learning algorithm for the analysis. Currently, it supports one of \code{c("BART", "GAM", "RF", "SL")}.
 #'               representing Bayesian Additive Regression Trees (BART), Generalized Boosted Method (GBM), Random Forest (RF),
 #'               and Super Learner (SL). The default is \code{BART}.
 #' @param controls A list of control arguments for analysis. See details.
+#' @param ... Additional argument for corresponding base-learners, e.g., \code{bart} in \code{dbarts} for BART,
+#'            \code{ranger} in package \code{ranger} for random forest.
 #'
 #' @details For S-, T-, X-, and R-learner, they are initially proposed for two-treatment scenarios,
 #' but can be extended to multiple-treatment following the same gist. R-learner will yield multiple sets
@@ -72,7 +74,7 @@ MetaLearners <- function(X,
                          Y,
                          Trt,
                          X.test = NULL,
-                         Learners = c("X", "R", "Rsim", "AD"),
+                         Learners = c("S", "T", "X", "R", "Rsim", "AD", "deC"),
                          algorithm = "BART",
                          controls = list(
                            SL.library = c("SL.bartMachine", "SL.gam", "SL.ranger"),
@@ -82,7 +84,8 @@ MetaLearners <- function(X,
                            n.knots = 3,
                            X_train = NULL,
                            X_test = NULL
-                         )
+                         ),
+                         ...
 ) {
   # test dataset
   if (is.null(X.test)) {
@@ -126,6 +129,9 @@ MetaLearners <- function(X,
   }
 
   # generate simplex coordinates
+  if ("deC" %in% Learners) {
+    Learners = c("S", "T", Learners)
+  }
   k = length(K.grp)
   z = rep(1, k-1)
   e = diag(x = 1, k-1)
@@ -181,33 +187,46 @@ MetaLearners <- function(X,
   if (length(unique(Y)) == 2) { # Binary
     ######=============================== BART ==================================#####
     if (algorithm == "BART") {
-      ######  BART: S-learner  ######
-      dat.train = data.frame(trt = Trt, X)
-      dat.tmp = dat.train
-      for (ii in K.grp) {
-        tmp = data.frame(trt = ii, rbind(X, X.test))
-        dat.tmp = rbind(dat.tmp, tmp)
+      if ("S" %in% Learners) {
+        ######  BART: S-learner  ######
+        dat.train = data.frame(trt = Trt, X)
+        dat.tmp = dat.train
+        for (ii in K.grp) {
+          tmp = data.frame(trt = ii, rbind(X, X.test))
+          dat.tmp = rbind(dat.tmp, tmp)
+        }
+        dat.tmp[,1] = as.factor(dat.tmp[,1])
+        Z = as.matrix(dat.tmp[,-1])
+        dat.S = stats::model.matrix(~trt*Z-1, dat.tmp)
+        dat.train = dat.S[1:n.train,]; dat.test = dat.S[-(1:n.train),]
+        S.fit = bart(x.train = dat.train, y.train = Y, x.test = dat.test,
+                     keeptrainfits = F,
+                     keeptrees = F,
+                     verbose = FALSE, ...)
+        S.res = matrix(colMeans(S.fit$yhat.test), ncol = length(K.grp), byrow = F)
+        S.res = pnorm(S.res) # Bart use probit link
+        SC.res= S.res[1:n.train,]; SC.res = log(SC.res/(1-SC.res))  # for deC learner, we need logOR, so here we report log(Odds)
+        S.res = S.res[-(1:n.train),] # here we report is mu(x) = Pr(Y=1; x)
+        remove(S.fit)
+        gc(verbose = FALSE)
       }
-      dat.tmp[,1] = as.factor(dat.tmp[,1])
-      Z = as.matrix(dat.tmp[,-1])
-      dat.S = stats::model.matrix(~trt*Z-1, dat.tmp)
-      dat.train = dat.S[1:n.train,]; dat.test = dat.S[-(1:n.train),]
-      S.fit = bart(x.train = dat.train, y.train = Y, x.test = dat.test, ntree = 200, verbose = FALSE)
-      S.res = matrix(colMeans(S.fit$yhat.test), ncol = length(K.grp), byrow = F)
-      S.res = pnorm(S.res) # Bart use probit link
-      SC.res= S.res[1:n.train,]; SC.res = log(SC.res/(1-SC.res))  # for deC learner, we need logOR, so here we report log(Odds)
-      S.res = S.res[-(1:n.train),] # here we report is mu(x) = Pr(Y=1; x)
-
 
       ######  BART: T-learner  ######
-      T.res = NULL; TX.res = NULL
-      for (ii in K.grp) {
-        T.bart = bart(x.train = X[Trt==ii,], y.train = Y[Trt==ii], x.test = rbind(X, X.test), ntree = 200, verbose = FALSE)
-        TX.res = cbind(TX.res, colMeans(T.bart$yhat.test)[1:nrow(X)])
-        T.res = cbind(T.res, colMeans(T.bart$yhat.test)[-(1:nrow(X))])
+      if ("T" %in% Learners) {
+        T.res = NULL; TX.res = NULL
+        for (ii in K.grp) {
+          T.bart = bart(x.train = X[Trt==ii,], y.train = Y[Trt==ii], x.test = rbind(X, X.test),
+                        keeptrainfits = F,
+                        keeptrees = F,
+                        verbose = FALSE, ...)
+          TX.res = cbind(TX.res, colMeans(T.bart$yhat.test)[1:nrow(X)])
+          T.res = cbind(T.res, colMeans(T.bart$yhat.test)[-(1:nrow(X))])
+        }
+        T.res = pnorm(T.res) # here we report is mu(x) = Pr(Y=1; x)
+        TX.res = pnorm(TX.res); TX.res = log(TX.res/(1-TX.res)) # log(Odds) for deC-learner
+        remove(T.bart)
+        gc(verbose = FALSE)
       }
-      T.res = pnorm(T.res) # here we report is mu(x) = Pr(Y=1; x)
-      TX.res = pnorm(TX.res); TX.res = log(TX.res/(1-TX.res)) # log(Odds) for deC-learner
 
       ######  BART: X-learner  ######
       # not available so far
@@ -220,96 +239,116 @@ MetaLearners <- function(X,
     ######=============================== GAM ==================================#####
     if (algorithm == "GAM") {
       ######  GAM: S-learner  ######
-      dat.train = data.frame(trt = Trt, X_train)
-      dat.tmp = dat.train
-      for (ii in K.grp) {
-        tmp = data.frame(trt = ii, rbind(X_train, X_test))
-        dat.tmp = rbind(dat.tmp, tmp)
+      if ("S" %in% Learners) {
+        dat.train = data.frame(trt = Trt, X_train)
+        dat.tmp = dat.train
+        for (ii in K.grp) {
+          tmp = data.frame(trt = ii, rbind(X_train, X_test))
+          dat.tmp = rbind(dat.tmp, tmp)
+        }
+        dat.tmp[,1] = as.factor(dat.tmp[,1])
+        Z = as.matrix(dat.tmp[,-1])
+        dat.S = stats::model.matrix(~trt*Z-1, dat.tmp)
+        dat.train = dat.S[1:n.train,]; dat.test = dat.S[-(1:n.train),]
+        S.GAM = cv.glmnet(dat.train, Y, family = "binomial", parallel = TRUE, intercept=T, ...)
+        S.res = matrix(predict(S.GAM, newx = dat.test, type = "response", s = "lambda.min"), ncol = length(K.grp), byrow = F)
+        SC.res= S.res[1:n.train,]; SC.res = log(SC.res/(1-SC.res))
+        S.res = S.res[-(1:n.train),]
+        remove(S.GAM)
+        gc(verbose = FALSE)
       }
-      dat.tmp[,1] = as.factor(dat.tmp[,1])
-      Z = as.matrix(dat.tmp[,-1])
-      dat.S = stats::model.matrix(~trt*Z-1, dat.tmp)
-      dat.train = dat.S[1:n.train,]; dat.test = dat.S[-(1:n.train),]
-      S.GAM = cv.glmnet(dat.train, Y, family = "binomial", parallel = TRUE, maxit = 100000, intercept=T)
-      S.res = matrix(predict(S.GAM, newx = dat.test, type = "response", s = "lambda.min"), ncol = length(K.grp), byrow = F)
-      SC.res= S.res[1:n.train,]; SC.res = log(SC.res/(1-SC.res))
-      S.res = S.res[-(1:n.train),]
 
       ######  GAM: T-learner  ######
-      T.res = NULL; TX.res = NULL
-      for (ii in K.grp) {
-        T.GAM = cv.glmnet(X_train[Trt==ii,], Y[Trt==ii], family = "binomial", parallel = TRUE, maxit = 100000, intercept=T)
-        TX.res = cbind(TX.res, predict(T.GAM, newx = X_train, type = "response", s = "lambda.min"))
-        T.res = cbind(T.res, predict(T.GAM, newx = X_test, type = "response", s = "lambda.min"))
+      if ("T" %in% Learners) {
+        T.res = NULL; TX.res = NULL
+        for (ii in K.grp) {
+          T.GAM = cv.glmnet(X_train[Trt==ii,], Y[Trt==ii], family = "binomial", parallel = TRUE, intercept=T, ...)
+          TX.res = cbind(TX.res, predict(T.GAM, newx = X_train, type = "response", s = "lambda.min"))
+          T.res = cbind(T.res, predict(T.GAM, newx = X_test, type = "response", s = "lambda.min"))
+        }
+        TX.res = log(TX.res/(1-TX.res)) # log(Odds) for deC-learner
+        remove(T.GAM)
+        gc()
       }
-      TX.res = log(TX.res/(1-TX.res)) # log(Odds) for deC-learner
-
     }
 
     ######=============================== RF ==================================#####
     if (algorithm == "RF") {
-      ######  RF: S-learner  ######
-      dat.train = data.frame(trt = Trt, X)
-      dat.tmp = dat.train
-      for (ii in K.grp) {
-        tmp = data.frame(trt = ii, rbind(X, X.test))
-        dat.tmp = rbind(dat.tmp, tmp)
+      if ("S" %in% Learners) {
+        ######  RF: S-learner  ######
+        dat.train = data.frame(trt = Trt, X)
+        dat.tmp = dat.train
+        for (ii in K.grp) {
+          tmp = data.frame(trt = ii, rbind(X, X.test))
+          dat.tmp = rbind(dat.tmp, tmp)
+        }
+        dat.tmp[,1] = as.factor(dat.tmp[,1])
+        Z = as.matrix(dat.tmp[,-1])
+        dat.S = stats::model.matrix(~trt*Z-1, dat.tmp)
+        dat.train = dat.S[1:n.train,]; dat.test = dat.S[-(1:n.train),]
+        colnames(dat.test) <- colnames(data.frame(dat.train))
+        S.RF = ranger(Y~., data = data.frame(Y = Y, dat.train), ...)
+        S.res = matrix(predict(S.RF, data = dat.test)$predictions, ncol = length(K.grp), byrow = F)
+        SC.res= S.res[1:n.train,]; SC.res = log(SC.res/(1-SC.res))
+        S.res = S.res[-(1:n.train),]
+        remove(S.RF)
+        gc()
       }
-      dat.tmp[,1] = as.factor(dat.tmp[,1])
-      Z = as.matrix(dat.tmp[,-1])
-      dat.S = stats::model.matrix(~trt*Z-1, dat.tmp)
-      dat.train = dat.S[1:n.train,]; dat.test = dat.S[-(1:n.train),]
-      colnames(dat.test) <- colnames(data.frame(dat.train))
-      S.RF = ranger(Y~., data = data.frame(Y = Y, dat.train), num.trees = 500, probability = T)
-      S.res = matrix(predict(S.RF, data = dat.test)$predictions[,1], ncol = length(K.grp), byrow = F)
-      SC.res= S.res[1:n.train,]; SC.res = log(SC.res/(1-SC.res))
-      S.res = S.res[-(1:n.train),]
 
       ######  RF: T-learner  ######
+      if ("T" %in% Learners) {
       T.res = NULL; TX.res = NULL
       for (ii in K.grp) {
-        T.RF = ranger(Y~., data = data.frame(Y = Y[Trt==ii], X[Trt==ii,]), num.trees = 500, probability = T)
+        T.RF = ranger(Y~., data = data.frame(Y = Y[Trt==ii], X[Trt==ii,]), ...)
         TX.res = cbind(TX.res, predict(T.RF, data = data.frame(X))$predictions[,1])
         T.res = cbind(T.res, predict(T.RF, data = data.frame(X.test))$predictions[,1])
       }
       TX.res = log(TX.res/(1-TX.res)) # log(Odds) for deC-learner
+      remove(T.RF)
+      gc()
+      }
     }
 
 
     ######=================  General: deC-learner  =====================######
-    h.hatS = rowMeans(SC.res)
-    h.hatT = rowMeans(TX.res)
-    h.hat  = (h.hatT + h.hatS)/2
-    h.hatS.test = rowMeans(log(S.res/(1-S.res)))
-    h.hatT.test = rowMeans(log(T.res/(1-T.res)))
-    h.hat.test  = (h.hatS.test + h.hatT.test)/2
+    if ("deC" %in% Learners) {
+      h.hatS = rowMeans(SC.res)
+      h.hatT = rowMeans(TX.res)
+      h.hat  = (h.hatT + h.hatS)/2
+      h.hatS.test = rowMeans(log(S.res/(1-S.res)))
+      h.hatT.test = rowMeans(log(T.res/(1-T.res)))
+      h.hat.test  = (h.hatS.test + h.hatT.test)/2
 
-    # transform data X into required shape:
-    x.whole = cbind(1, X_train)
-    x.new = sapply(seq(n.train), function(i){
-      as.vector(outer(W[,Trt[i]] ,x.whole[i,]))
-    })
-    x.new = t(x.new)
-    penalty_f = c(rep(0,k-1), rep(1, pobs*(k-1)))
-    fit.tau  = cv.glmnet(x = x.new, y = Y, offset = h.hat, family = "binomial", parallel = TRUE, maxit = 100000, penalty.factor = penalty_f, intercept=FALSE)
-    fit.tauS = cv.glmnet(x = x.new, y = Y, offset = h.hatS, family = "binomial", parallel = TRUE, maxit = 100000, penalty.factor = penalty_f, intercept=FALSE)
-    fit.tauT = cv.glmnet(x = x.new, y = Y, offset = h.hatT, family = "binomial", parallel = TRUE, maxit = 100000, penalty.factor = penalty_f, intercept=FALSE)
+      # transform data X into required shape:
+      x.whole = cbind(1, X_train)
+      x.new = sapply(seq(n.train), function(i){
+        as.vector(outer(W[,Trt[i]] ,x.whole[i,]))
+      })
+      x.new = t(x.new)
+      penalty_f = c(rep(0,k-1), rep(1, pobs*(k-1)))
+      fit.tau  = cv.glmnet(x = x.new, y = Y, offset = h.hat, family = "binomial", parallel = TRUE, maxit = 100000, penalty.factor = penalty_f, intercept=FALSE)
+      fit.tauS = cv.glmnet(x = x.new, y = Y, offset = h.hatS, family = "binomial", parallel = TRUE, maxit = 100000, penalty.factor = penalty_f, intercept=FALSE)
+      fit.tauT = cv.glmnet(x = x.new, y = Y, offset = h.hatT, family = "binomial", parallel = TRUE, maxit = 100000, penalty.factor = penalty_f, intercept=FALSE)
+      gc(verbose = FALSE)
 
-    x.test.whole = cbind(1, X_test)
-    # combine both S- and T- results
-    best.beta = stats::coef(fit.tau,s="lambda.min")
-    best.beta = matrix(best.beta[-1], nrow = pobs+1, byrow = T)
-    C.resST = x.test.whole %*% best.beta %*% W + h.hat.test # this is log(Odds)
-    # based on S-
-    best.beta = stats::coef(fit.tauS, s="lambda.min")
-    best.beta = matrix(best.beta[-1], nrow = pobs+1, byrow = T)
-    C.resS = x.test.whole %*% best.beta %*% W + h.hatS.test
-    # based on T-
-    best.beta = stats::coef(fit.tauT, s="lambda.min")
-    best.beta = matrix(best.beta[-1], nrow = pobs+1, byrow = T)
-    C.resT = x.test.whole %*% best.beta %*% W + h.hatT.test
-    # deC-learner results
-    C.res = list(C.resST = 1/(1+exp(-C.resST)), C.resS = 1/(1+exp(-C.resS)), C.resT = 1/(1+exp(-C.resT))) # keep consistent, return Pr(Y=1)
+
+      x.test.whole = cbind(1, X_test)
+      # combine both S- and T- results
+      best.beta = stats::coef(fit.tau,s="lambda.min")
+      best.beta = matrix(best.beta[-1], nrow = pobs+1, byrow = T)
+      C.resST = x.test.whole %*% best.beta %*% W + h.hat.test # this is log(Odds)
+      # based on S-
+      best.beta = stats::coef(fit.tauS, s="lambda.min")
+      best.beta = matrix(best.beta[-1], nrow = pobs+1, byrow = T)
+      C.resS = x.test.whole %*% best.beta %*% W + h.hatS.test
+      # based on T-
+      best.beta = stats::coef(fit.tauT, s="lambda.min")
+      best.beta = matrix(best.beta[-1], nrow = pobs+1, byrow = T)
+      C.resT = x.test.whole %*% best.beta %*% W + h.hatT.test
+      # deC-learner results
+      C.res = list(C.resST = 1/(1+exp(-C.resST)), C.resS = 1/(1+exp(-C.resS)), C.resT = 1/(1+exp(-C.resT))) # keep consistent, return Pr(Y=1)
+    }
+
 
     return(list(S.res = S.res, T.res = T.res, C.res = C.res))
 
@@ -319,27 +358,35 @@ MetaLearners <- function(X,
     ######=============================== BART ==================================#####
     if (algorithm == "BART") {
       ######  BART: S-learner  ######
-      dat.train = data.frame(trt = Trt, X)
-      dat.tmp = dat.train
-      for (ii in K.grp) {
-        tmp = data.frame(trt = ii, rbind(X, X.test))
-        dat.tmp = rbind(dat.tmp, tmp)
+      if ("S" %in% Learners) {
+        dat.train = data.frame(trt = Trt, X)
+        dat.tmp = dat.train
+        for (ii in K.grp) {
+          tmp = data.frame(trt = ii, rbind(X, X.test))
+          dat.tmp = rbind(dat.tmp, tmp)
+        }
+        dat.tmp[,1] = as.factor(dat.tmp[,1])
+        Z = as.matrix(dat.tmp[,-1])
+        dat.S = stats::model.matrix(~trt*Z-1, dat.tmp)
+        dat.train = dat.S[1:n.train,]; dat.test = dat.S[-(1:n.train),]
+        S.fit = bart(x.train = dat.train, y.train = Y, x.test = dat.test, ntree = 200, verbose = FALSE)
+        S.res = matrix(colMeans(S.fit$yhat.test), ncol = length(K.grp), byrow = F)
+        SC.res= S.res[1:n.train,]; S.res = S.res[-(1:n.train),]
+        remove(S.fit)
+        gc(verbose = FALSE)
       }
-      dat.tmp[,1] = as.factor(dat.tmp[,1])
-      Z = as.matrix(dat.tmp[,-1])
-      dat.S = stats::model.matrix(~trt*Z-1, dat.tmp)
-      dat.train = dat.S[1:n.train,]; dat.test = dat.S[-(1:n.train),]
-      S.fit = bart(x.train = dat.train, y.train = Y, x.test = dat.test, ntree = 200, verbose = FALSE)
-      S.res = matrix(colMeans(S.fit$yhat.test), ncol = length(K.grp), byrow = F)
-      SC.res= S.res[1:n.train,]; S.res = S.res[-(1:n.train),]
-
 
       ######  BART: T-learner  ######
-      T.res = NULL; TX.res = NULL
-      for (ii in K.grp) {
-        T.bart = bart(x.train = X[Trt==ii,], y.train = Y[Trt==ii], x.test = rbind(X, X.test), ntree = 200, verbose = FALSE)
-        TX.res = cbind(TX.res, T.bart$yhat.test.mean[1:nrow(X)])
-        T.res = cbind(T.res, T.bart$yhat.test.mean[-(1:nrow(X))])
+      if ("T" %in% Learners) {
+        T.res = NULL; TX.res = NULL
+        for (ii in K.grp) {
+          T.bart = bart(x.train = X[Trt==ii,], y.train = Y[Trt==ii], x.test = rbind(X, X.test), ntree = 200, verbose = FALSE)
+          TX.res = cbind(TX.res, T.bart$yhat.test.mean[1:nrow(X)])
+          T.res = cbind(T.res, T.bart$yhat.test.mean[-(1:nrow(X))])
+          gc(verbose = FALSE)
+        }
+        remove(T.bart)
+        gc(verbose = FALSE)
       }
 
       # check if propensity score estimation is required
@@ -365,6 +412,7 @@ MetaLearners <- function(X,
           }
         }
         colnames(X.res) <- X.names
+        gc(verbose = FALSE)
       }
 
 
@@ -380,26 +428,34 @@ MetaLearners <- function(X,
     ######=============================== GAM ==================================#####
     if (algorithm == "GAM") {
       ######  GAM: S-learner  ######
-      dat.train = data.frame(trt = Trt, X_train)
-      dat.tmp = dat.train
-      for (ii in K.grp) {
-        tmp = data.frame(trt = ii, rbind(X_train, X_test))
-        dat.tmp = rbind(dat.tmp, tmp)
+      if ("S" %in% Learners) {
+        dat.train = data.frame(trt = Trt, X_train)
+        dat.tmp = dat.train
+        for (ii in K.grp) {
+          tmp = data.frame(trt = ii, rbind(X_train, X_test))
+          dat.tmp = rbind(dat.tmp, tmp)
+        }
+        dat.tmp[,1] = as.factor(dat.tmp[,1])
+        Z = as.matrix(dat.tmp[,-1])
+        dat.S = stats::model.matrix(~trt*Z-1, dat.tmp)
+        dat.train = dat.S[1:n.train,]; dat.test = dat.S[-(1:n.train),]
+        S.GAM = cv.glmnet(dat.train, Y, family = "gaussian", parallel = TRUE, maxit = 100000, intercept=T)
+        S.res = matrix(predict(S.GAM, newx = dat.test, type = "response", s = "lambda.min"), ncol = length(K.grp), byrow = F)
+        SC.res= S.res[1:n.train,]; S.res = S.res[-(1:n.train),]
+        remove(S.GAM)
+        gc(verbose = FALSE)
       }
-      dat.tmp[,1] = as.factor(dat.tmp[,1])
-      Z = as.matrix(dat.tmp[,-1])
-      dat.S = stats::model.matrix(~trt*Z-1, dat.tmp)
-      dat.train = dat.S[1:n.train,]; dat.test = dat.S[-(1:n.train),]
-      S.GAM = cv.glmnet(dat.train, Y, family = "gaussian", parallel = TRUE, maxit = 100000, intercept=T)
-      S.res = matrix(predict(S.GAM, newx = dat.test, type = "response", s = "lambda.min"), ncol = length(K.grp), byrow = F)
-      SC.res= S.res[1:n.train,]; S.res = S.res[-(1:n.train),]
 
       ######  GAM: T-learner  ######
-      T.res = NULL; TX.res = NULL
-      for (ii in K.grp) {
-        T.GAM = cv.glmnet(X_train[Trt==ii,], Y[Trt==ii], family = "gaussian", parallel = TRUE, maxit = 100000, intercept=T)
-        TX.res = cbind(TX.res, predict(T.GAM, newx = X_train, type = "response", s = "lambda.min"))
-        T.res = cbind(T.res, predict(T.GAM, newx = X_test, type = "response", s = "lambda.min"))
+      if ("T" %in% Learners) {
+        T.res = NULL; TX.res = NULL
+        for (ii in K.grp) {
+          T.GAM = cv.glmnet(X_train[Trt==ii,], Y[Trt==ii], family = "gaussian", parallel = TRUE, maxit = 100000, intercept=T)
+          TX.res = cbind(TX.res, predict(T.GAM, newx = X_train, type = "response", s = "lambda.min"))
+          T.res = cbind(T.res, predict(T.GAM, newx = X_test, type = "response", s = "lambda.min"))
+        }
+        remove(T.GAM)
+        gc(verbose = FALSE)
       }
 
       # check if propensity score estimation is required
@@ -418,6 +474,7 @@ MetaLearners <- function(X,
           ps.train= cbind(1-pi.hat, pi.hat) + 1
           colnames(ps.test) <- colnames(ps.train) <- c("0", "1")
         }
+        gc(verbose = FALSE)
       }
 
       ######  GAM: X-learner  ######
@@ -435,6 +492,7 @@ MetaLearners <- function(X,
           }
         }
         colnames(X.res) <- X.names
+        gc(verbose = FALSE)
       }
 
 
@@ -452,27 +510,36 @@ MetaLearners <- function(X,
     ######=============================== RF ==================================#####
     if (algorithm == "RF") {
       ######  RF: S-learner  ######
-      dat.train = data.frame(trt = Trt, X)
-      dat.tmp = dat.train
-      for (ii in K.grp) {
-        tmp = data.frame(trt = ii, rbind(X, X.test))
-        dat.tmp = rbind(dat.tmp, tmp)
+      if ("S" %in% Learners) {
+        dat.train = data.frame(trt = Trt, X)
+        dat.tmp = dat.train
+        for (ii in K.grp) {
+          tmp = data.frame(trt = ii, rbind(X, X.test))
+          dat.tmp = rbind(dat.tmp, tmp)
+        }
+        dat.tmp[,1] = as.factor(dat.tmp[,1])
+        Z = as.matrix(dat.tmp[,-1])
+        dat.S = stats::model.matrix(~trt*Z-1, dat.tmp)
+        dat.train = dat.S[1:n.train,]; dat.test = dat.S[-(1:n.train),]
+        colnames(dat.test) <- colnames(data.frame(dat.train))
+        S.RF = ranger(Y~., data = data.frame(Y = Y, dat.train), num.trees = 500)
+        S.res = matrix(predict(S.RF, data = dat.test)$predictions, ncol = length(K.grp), byrow = F)
+        SC.res= S.res[1:n.train,]; S.res = S.res[-(1:n.train),]
+        remove(S.RF)
+        gc(verbose = FALSE)
       }
-      dat.tmp[,1] = as.factor(dat.tmp[,1])
-      Z = as.matrix(dat.tmp[,-1])
-      dat.S = stats::model.matrix(~trt*Z-1, dat.tmp)
-      dat.train = dat.S[1:n.train,]; dat.test = dat.S[-(1:n.train),]
-      colnames(dat.test) <- colnames(data.frame(dat.train))
-      S.RF = ranger(Y~., data = data.frame(Y = Y, dat.train), num.trees = 500)
-      S.res = matrix(predict(S.RF, data = dat.test)$predictions, ncol = length(K.grp), byrow = F)
-      SC.res= S.res[1:n.train,]; S.res = S.res[-(1:n.train),]
 
       ######  RF: T-learner  ######
-      T.res = NULL; TX.res = NULL
-      for (ii in K.grp) {
-        T.RF = ranger(Y~., data = data.frame(Y = Y[Trt==ii], X[Trt==ii,]), num.trees = 500)
-        TX.res = cbind(TX.res, predict(T.RF, data = data.frame(X))$predictions)
-        T.res = cbind(T.res, predict(T.RF, data = data.frame(X.test))$predictions)
+      if ("T" %in% Learners) {
+        T.res = NULL; TX.res = NULL
+        for (ii in K.grp) {
+          T.RF = ranger(Y~., data = data.frame(Y = Y[Trt==ii], X[Trt==ii,]), num.trees = 500)
+          TX.res = cbind(TX.res, predict(T.RF, data = data.frame(X))$predictions)
+          T.res = cbind(T.res, predict(T.RF, data = data.frame(X.test))$predictions)
+          gc(verbose = FALSE)
+        }
+        remove(T.RF)
+        gc(verbose = FALSE)
       }
 
       # check if propensity score estimation is required
@@ -495,9 +562,12 @@ MetaLearners <- function(X,
             ps.ij    = ps.ij/rowSums(ps.ij)
             X.res    = cbind(X.res, predict(X.rf.i, data = data.frame(X.test))$predictions*ps.ij[,2]+predict(X.rf.j, data = data.frame(X.test))$predictions*ps.ij[,1])
             X.names  = c(X.names, paste0(Trt.name[i],"-",Trt.name[j]))
+            gc(verbose = FALSE)
           }
         }
         colnames(X.res) <- X.names
+        remove(X.rf.i, X.rf.j)
+        gc(verbose = FALSE)
       }
 
 
@@ -517,36 +587,40 @@ MetaLearners <- function(X,
 
 
     ######=================  General: deC-learner  =====================######
-    h.hat  = (rowMeans(TX.res) + rowMeans(SC.res))/2
-    h.hatS = rowMeans(SC.res)
-    h.hatT = rowMeans(TX.res)
+    if ("deC" %in% Learners) {
+      h.hat  = (rowMeans(TX.res) + rowMeans(SC.res))/2
+      h.hatS = rowMeans(SC.res)
+      h.hatT = rowMeans(TX.res)
 
-    # transform data X into required shape:
-    x.whole = cbind(1, X_train)
-    x.new = sapply(seq(n.train), function(i){
-      as.vector(outer(W[,Trt[i]] ,x.whole[i,]))
-    })
-    x.new = t(x.new)
-    penalty_f = c(rep(0,k-1), rep(1, pobs*(k-1)))
-    fit.tau  = cv.glmnet(x.new, Y-h.hat, family = "gaussian", parallel = TRUE, maxit = 100000, penalty.factor = penalty_f, intercept=FALSE)
-    fit.tauS = cv.glmnet(x.new, Y-h.hatS, family = "gaussian", parallel = TRUE, maxit = 100000, penalty.factor = penalty_f, intercept=FALSE)
-    fit.tauT = cv.glmnet(x.new, Y-h.hatT, family = "gaussian", parallel = TRUE, maxit = 100000, penalty.factor = penalty_f, intercept=FALSE)
+      # transform data X into required shape:
+      x.whole = cbind(1, X_train)
+      x.new = sapply(seq(n.train), function(i){
+        as.vector(outer(W[,Trt[i]] ,x.whole[i,]))
+      })
+      x.new = t(x.new)
+      penalty_f = c(rep(0,k-1), rep(1, pobs*(k-1)))
+      fit.tau  = cv.glmnet(x.new, Y-h.hat, family = "gaussian", parallel = TRUE, maxit = 100000, penalty.factor = penalty_f, intercept=FALSE)
+      fit.tauS = cv.glmnet(x.new, Y-h.hatS, family = "gaussian", parallel = TRUE, maxit = 100000, penalty.factor = penalty_f, intercept=FALSE)
+      fit.tauT = cv.glmnet(x.new, Y-h.hatT, family = "gaussian", parallel = TRUE, maxit = 100000, penalty.factor = penalty_f, intercept=FALSE)
+      gc(verbose = FALSE)
 
-    x.test.whole = cbind(1, X_test)
-    # combine both S- and T- results
-    best.beta = stats::coef(fit.tau,s="lambda.min")
-    best.beta = matrix(best.beta[-1], nrow = pobs+1, byrow = T)
-    C.resST = x.test.whole %*% best.beta %*% W
-    # based on S-
-    best.beta = stats::coef(fit.tauS, s="lambda.min")
-    best.beta = matrix(best.beta[-1], nrow = pobs+1, byrow = T)
-    C.resS = x.test.whole %*% best.beta %*% W
-    # based on T-
-    best.beta = stats::coef(fit.tauT, s="lambda.min")
-    best.beta = matrix(best.beta[-1], nrow = pobs+1, byrow = T)
-    C.resT = x.test.whole %*% best.beta %*% W
-    # deC-learner results
-    C.res = list(C.resST = C.resST, C.resS = C.resS, C.resT = C.resT)
+      x.test.whole = cbind(1, X_test)
+      # combine both S- and T- results
+      best.beta = stats::coef(fit.tau,s="lambda.min")
+      best.beta = matrix(best.beta[-1], nrow = pobs+1, byrow = T)
+      C.resST = x.test.whole %*% best.beta %*% W
+      # based on S-
+      best.beta = stats::coef(fit.tauS, s="lambda.min")
+      best.beta = matrix(best.beta[-1], nrow = pobs+1, byrow = T)
+      C.resS = x.test.whole %*% best.beta %*% W
+      # based on T-
+      best.beta = stats::coef(fit.tauT, s="lambda.min")
+      best.beta = matrix(best.beta[-1], nrow = pobs+1, byrow = T)
+      C.resT = x.test.whole %*% best.beta %*% W
+      # deC-learner results
+      C.res = list(C.resST = C.resST, C.resS = C.resS, C.resT = C.resT)
+    }
+
 
     ######=================  General: R-learner  =====================######
     if ("R" %in% Learners) {
@@ -559,6 +633,8 @@ MetaLearners <- function(X,
         x.tilde = matrix(as.vector(apply(adj.pi, 2, function(j) j * cbind(1,X_train))), nrow = nrow(X_train), byrow = F)
         penalty_factor = rep(c(0, array(1, pobs)), length(K.grp)-1)
         fit.R = glmnet::cv.glmnet(x.tilde, y.adj, penalty.factor = penalty_factor, family = "gaussian", parallel = TRUE, maxit = 100000, intercept = F)
+        gc(verbose = FALSE)
+
 
         ## test data
         Est.R = NULL
@@ -586,6 +662,7 @@ MetaLearners <- function(X,
       Y.mat  = sapply(seq(n.train), function(i) length(K.grp)*Y[i]*W[,Trt[i]])
       AD.fit = cv.glmnet(X_train, t(Y.mat), family="mgaussian", weights = wts, parallel = TRUE, intercept = TRUE)
       AD.res = predict(AD.fit, newx = X_test, s = "lambda.min")[,,1] %*% W
+      gc(verbose = FALSE)
     }
 
     # returns
